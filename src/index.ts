@@ -5,6 +5,7 @@ export type {
   EventsResource,
   MessagesResource,
   PollsResource,
+  ProfileResource,
   WhatsApp,
 } from "./client.ts";
 export { createClient } from "./client.ts";
@@ -40,15 +41,24 @@ export type {
   PollVoteChangedEvent,
 } from "./types/events.ts";
 export type {
+  AlbumItem,
+  ContactCard,
   Message,
   MessageAttachment,
   MessageAttachmentKind,
+  MessageDeliveryStatus,
   MessageListOptions,
   MessagePage,
   MessageReaction,
+  MessageStatusInfo,
   MessageText,
+  RemoveMessageResult,
+  SendAudioOptions,
+  SendDocumentOptions,
   SendImageOptions,
+  SendStickerOptions,
   SendTextOptions,
+  SendVideoOptions,
   TextBlock,
   TextBlockType,
   TextContent,
@@ -61,3 +71,7 @@ export type {
   PollChoice,
   PollWriteOptions,
 } from "./types/polls.ts";
+export type {
+  ModifyProfileOptions,
+  ProfileUpdateResult,
+} from "./types/profile.ts";

@@ -1,16 +1,25 @@
 import { EventsResource as EventsImpl } from "./resources/events.ts";
 import { MessagesResource as MessagesImpl } from "./resources/messages.ts";
 import { PollsResource as PollsImpl } from "./resources/polls.ts";
+import { ProfileResource as ProfileImpl } from "./resources/profile.ts";
 import type { TypedEventStream } from "./streaming/event-stream.ts";
 import { createGrpcClients } from "./transport/grpc-client.ts";
 import type { RetryOptions, WriteOptions } from "./types/common.ts";
 import type { CatchUpReplay, MessageEvent, PollEvent } from "./types/events.ts";
 import type {
+  AlbumItem,
+  ContactCard,
   Message,
   MessageListOptions,
   MessagePage,
+  MessageStatusInfo,
+  RemoveMessageResult,
+  SendAudioOptions,
+  SendDocumentOptions,
   SendImageOptions,
+  SendStickerOptions,
   SendTextOptions,
+  SendVideoOptions,
   TextContent,
 } from "./types/messages.ts";
 import type {
@@ -18,6 +27,10 @@ import type {
   Poll,
   PollWriteOptions,
 } from "./types/polls.ts";
+import type {
+  ModifyProfileOptions,
+  ProfileUpdateResult,
+} from "./types/profile.ts";
 
 export interface ClientOptions {
   /** gRPC server address, for example `"127.0.0.1:50051"`. */
@@ -39,6 +52,31 @@ export interface MessagesResource {
    * Messages are read from ChatStorage, not the helper.
    */
   get(messageId: string): Promise<Message>;
+  /**
+   * Deletes a message locally ("delete for me"). The message stays on the
+   * recipient's device. Resolves once the local row is gone.
+   */
+  delete(
+    messageId: string,
+    options?: WriteOptions
+  ): Promise<RemoveMessageResult>;
+  /**
+   * Edits one of this account's outgoing text messages and returns the updated
+   * snapshot once ChatStorage reflects the new text.
+   *
+   * WhatsApp only allows edits within its send window (roughly 15 minutes).
+   */
+  edit(
+    messageId: string,
+    text: string,
+    options?: WriteOptions
+  ): Promise<Message>;
+  /**
+   * Reads WhatsApp's own computed delivery status for one message.
+   *
+   * Point-in-time read; poll again to observe transitions.
+   */
+  getStatus(messageId: string): Promise<MessageStatusInfo>;
   /**
    * Pages through one chat's messages.
    *
@@ -62,6 +100,57 @@ export interface MessagesResource {
     options?: WriteOptions
   ): Promise<Message>;
   /**
+   * Revokes one of this account's outgoing messages for everyone
+   * ("delete for everyone"). Resolves once the local row is gone.
+   *
+   * WhatsApp's server-side revoke window (roughly two days) still applies.
+   */
+  revoke(
+    messageId: string,
+    options?: WriteOptions
+  ): Promise<RemoveMessageResult>;
+  /**
+   * Sends 2 to 30 same-kind media items as one album and returns the persisted
+   * snapshots, oldest first. WhatsApp groups them into a native album bubble
+   * when album sending is enabled for the account.
+   */
+  sendAlbum(
+    recipient: string,
+    items: readonly AlbumItem[],
+    options?: WriteOptions
+  ): Promise<Message[]>;
+  /**
+   * Sends a voice-note audio message and returns the persisted local ChatStorage
+   * snapshot observed after the server sees a successful local send/upload signal.
+   *
+   * `audio` must contain the file bytes for one decodable audio file.
+   */
+  sendAudio(
+    recipient: string,
+    audio: Uint8Array,
+    options?: SendAudioOptions
+  ): Promise<Message>;
+  /**
+   * Sends one or more contact cards and returns the persisted local ChatStorage
+   * snapshot observed after the server sees a successful local send signal.
+   */
+  sendContact(
+    recipient: string,
+    contacts: ContactCard | readonly ContactCard[],
+    options?: WriteOptions
+  ): Promise<Message>;
+  /**
+   * Sends a document attachment and returns the persisted local ChatStorage
+   * snapshot observed after the server sees a successful local send/upload signal.
+   *
+   * `document` must contain the file bytes for one document.
+   */
+  sendDocument(
+    recipient: string,
+    document: Uint8Array,
+    options?: SendDocumentOptions
+  ): Promise<Message>;
+  /**
    * Sends an image and returns the persisted local ChatStorage snapshot observed
    * after the server sees a successful local send/upload signal.
    *
@@ -71,6 +160,17 @@ export interface MessagesResource {
     recipient: string,
     image: Uint8Array,
     options?: SendImageOptions
+  ): Promise<Message>;
+  /**
+   * Sends a sticker and returns the persisted local ChatStorage snapshot observed
+   * after the server sees a successful local send/upload signal.
+   *
+   * `sticker` must contain image bytes; WhatsApp converts them to WebP.
+   */
+  sendSticker(
+    recipient: string,
+    sticker: Uint8Array,
+    options?: SendStickerOptions
   ): Promise<Message>;
   /**
    * Sends a text message and returns the persisted local ChatStorage snapshot observed
@@ -83,6 +183,17 @@ export interface MessagesResource {
     recipient: string,
     content: TextContent,
     options?: SendTextOptions
+  ): Promise<Message>;
+  /**
+   * Sends a video and returns the persisted local ChatStorage snapshot observed
+   * after the server sees a successful local send/upload signal.
+   *
+   * `video` must contain the file bytes for one video.
+   */
+  sendVideo(
+    recipient: string,
+    video: Uint8Array,
+    options?: SendVideoOptions
   ): Promise<Message>;
   /** Streams future message events. Use `events.catchUp(...)` after reconnects. */
   subscribeEvents(filter?: {
@@ -130,12 +241,21 @@ export interface EventsResource {
   catchUp(since?: number): CatchUpReplay;
 }
 
+export interface ProfileResource {
+  /**
+   * Updates the current account's push name, about text, and/or avatar.
+   * At least one field is required. Returns which fields were applied.
+   */
+  modify(options: ModifyProfileOptions): Promise<ProfileUpdateResult>;
+}
+
 export interface WhatsApp extends AsyncDisposable {
   /** Closes the underlying gRPC channel. */
   close(): Promise<void>;
   readonly events: EventsResource;
   readonly messages: MessagesResource;
   readonly polls: PollsResource;
+  readonly profile: ProfileResource;
 }
 
 export function createClient(options: ClientOptions): WhatsApp {
@@ -150,6 +270,7 @@ export function createClient(options: ClientOptions): WhatsApp {
   const messages = new MessagesImpl(clients.messages);
   const polls = new PollsImpl(clients.polls);
   const events = new EventsImpl(clients.events);
+  const profile = new ProfileImpl(clients.profile);
 
   function close(): Promise<void> {
     clients.channel.close();
@@ -160,6 +281,7 @@ export function createClient(options: ClientOptions): WhatsApp {
     messages,
     polls,
     events,
+    profile,
     close,
     async [Symbol.asyncDispose](): Promise<void> {
       await close();

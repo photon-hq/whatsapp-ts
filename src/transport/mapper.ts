@@ -17,12 +17,15 @@ import type {
   PollChangeEvent as ProtoPollChangeEvent,
   PollChoice as ProtoPollChoice,
 } from "../generated/whatsapp_poll_types.ts";
+import { MessageDeliveryStatus as ProtoMessageDeliveryStatus } from "../generated/whatsapp_message_service.ts";
 import type { MessageEvent, PollEvent } from "../types/events.ts";
 import type {
   Message,
   MessageAttachment,
   MessageAttachmentKind,
+  MessageDeliveryStatus,
   MessageMedia,
+  MessageStatusInfo,
   MessagePage,
   MessageReaction,
   MessageReceiptUpdate,
@@ -35,6 +38,49 @@ import type {
   NormalizedTextBlock,
   NormalizedTextRun,
 } from "../utils/text-content.ts";
+
+export function mapMessageStatus(response: {
+  readonly messageId: string;
+  readonly status: ProtoMessageDeliveryStatus;
+  readonly statusCode: number;
+  readonly isFromMe: boolean;
+  readonly isSent: boolean;
+  readonly isError: boolean;
+  readonly isPlayed: boolean;
+  readonly text: string;
+}): MessageStatusInfo {
+  return {
+    messageId: response.messageId,
+    status: toDeliveryStatus(response.status),
+    statusCode: response.statusCode,
+    isFromMe: response.isFromMe,
+    isSent: response.isSent,
+    isError: response.isError,
+    isPlayed: response.isPlayed,
+    text: response.text,
+  };
+}
+
+function toDeliveryStatus(
+  status: ProtoMessageDeliveryStatus
+): MessageDeliveryStatus {
+  switch (status) {
+    case ProtoMessageDeliveryStatus.MESSAGE_DELIVERY_STATUS_PENDING:
+      return "pending";
+    case ProtoMessageDeliveryStatus.MESSAGE_DELIVERY_STATUS_SENT:
+      return "sent";
+    case ProtoMessageDeliveryStatus.MESSAGE_DELIVERY_STATUS_DELIVERED:
+      return "delivered";
+    case ProtoMessageDeliveryStatus.MESSAGE_DELIVERY_STATUS_READ:
+      return "read";
+    case ProtoMessageDeliveryStatus.MESSAGE_DELIVERY_STATUS_PLAYED:
+      return "played";
+    case ProtoMessageDeliveryStatus.MESSAGE_DELIVERY_STATUS_ERROR:
+      return "error";
+    default:
+      return "unknown";
+  }
+}
 
 export function mapTextBlock(input: NormalizedTextBlock): ProtoTextBlock {
   return {

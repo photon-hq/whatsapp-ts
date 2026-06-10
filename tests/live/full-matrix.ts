@@ -1,10 +1,16 @@
+import { Database } from "bun:sqlite";
+import { readdirSync } from "node:fs";
 import { createClient } from "../../src/index.ts";
 import type { MessageEvent, PollEvent } from "../../src/types/events.ts";
 import type { TextContent } from "../../src/types/messages.ts";
 import {
   ChatStorageReader,
   isSuccessStatus,
+  makeM4a,
+  makeMp4,
+  makePdf,
   makePng,
+  makeVcard,
   stanzaOf,
 } from "./fixtures.ts";
 
@@ -196,6 +202,173 @@ async function mediaMatrix(target: string): Promise<void> {
   });
 }
 
+async function attachmentMatrix(target: string): Promise<void> {
+  const t = tag();
+
+  await run("media.video", target, async () => {
+    const m = await wa.messages.sendVideo(target, makeMp4(), {
+      caption: `video ${t}`,
+    });
+    const row = await db.waitForStatus(stanzaOf(m.messageId));
+    return {
+      messageId: m.messageId,
+      apiStatus: m.messageStatus,
+      dbStatus: row?.status ?? null,
+      delivered: isSuccessStatus(row?.status ?? null),
+      detail: `mediaUrl=${row?.mediaUrl ? "set" : "empty"}`,
+    };
+  });
+
+  await run("media.document", target, async () => {
+    const m = await wa.messages.sendDocument(target, makePdf(`matrix ${t}`), {
+      fileName: `matrix-${t}.pdf`,
+      mimeType: "application/pdf",
+    });
+    const row = await db.waitForStatus(stanzaOf(m.messageId));
+    return {
+      messageId: m.messageId,
+      apiStatus: m.messageStatus,
+      dbStatus: row?.status ?? null,
+      delivered: isSuccessStatus(row?.status ?? null),
+    };
+  });
+
+  await run("media.audio", target, async () => {
+    const m = await wa.messages.sendAudio(target, makeM4a());
+    const row = await db.waitForStatus(stanzaOf(m.messageId));
+    return {
+      messageId: m.messageId,
+      apiStatus: m.messageStatus,
+      dbStatus: row?.status ?? null,
+      delivered: isSuccessStatus(row?.status ?? null),
+    };
+  });
+
+  await run("media.sticker", target, async () => {
+    const m = await wa.messages.sendSticker(target, makePng(96), {
+      emojis: ["😀"],
+    });
+    const row = await db.waitForStatus(stanzaOf(m.messageId));
+    return {
+      messageId: m.messageId,
+      apiStatus: m.messageStatus,
+      dbStatus: row?.status ?? null,
+      delivered: isSuccessStatus(row?.status ?? null),
+    };
+  });
+
+  await run("media.contact", target, async () => {
+    const m = await wa.messages.sendContact(target, {
+      name: `Matrix Tester ${t}`,
+      vcard: makeVcard({
+        name: `Matrix Tester ${t}`,
+        phone: "+10000000000",
+        email: "matrix@example.com",
+      }),
+    });
+    const row = await db.waitForStatus(stanzaOf(m.messageId));
+    return {
+      messageId: m.messageId,
+      apiStatus: m.messageStatus,
+      dbStatus: row?.status ?? null,
+      delivered: isSuccessStatus(row?.status ?? null),
+    };
+  });
+
+  await run("media.album", target, async () => {
+    const sent = await wa.messages.sendAlbum(target, [
+      { kind: "image", data: makePng(64, [220, 40, 40]), caption: `a1 ${t}` },
+      { kind: "image", data: makePng(64, [40, 220, 40]), caption: `a2 ${t}` },
+    ]);
+    if (sent.length !== 2) {
+      throw new Error(`expected 2 snapshots, got ${sent.length}`);
+    }
+    const ids = new Set(sent.map((m) => m.messageId));
+    if (ids.size !== 2) {
+      throw new Error("album returned duplicate message ids");
+    }
+    return { messageId: sent[0]?.messageId, detail: `items=${sent.length}` };
+  });
+}
+
+async function lifecycleMatrix(target: string): Promise<void> {
+  const t = tag();
+
+  const editId = await sendText("lifecycle.seed", target, `lifecycle ${t}`);
+  if (editId) {
+    await run("lifecycle.edit", target, async () => {
+      const edited = await wa.messages.edit(editId, `lifecycle edited ${t}`);
+      return { messageId: edited.messageId, detail: `text="${edited.text}"` };
+    });
+    await run("lifecycle.getStatus", target, async () => {
+      const status = await wa.messages.getStatus(editId);
+      return { messageId: editId, detail: `status=${status.status}` };
+    });
+    await run("lifecycle.revoke", target, async () => {
+      const result = await wa.messages.revoke(editId);
+      if (!result.removed) {
+        throw new Error("revoke did not report removed");
+      }
+      return { messageId: result.messageId, detail: "revoked" };
+    });
+  }
+
+  const deleteId = await sendText("lifecycle.seed2", target, `to-delete ${t}`);
+  if (deleteId) {
+    await run("lifecycle.delete", target, async () => {
+      const result = await wa.messages.delete(deleteId);
+      if (!result.removed) {
+        throw new Error("delete did not report removed");
+      }
+      return { messageId: result.messageId, detail: "deleted locally" };
+    });
+  }
+}
+
+async function profileMatrix(): Promise<void> {
+  await run("profile.modifyAndRestore", "self", async () => {
+    const original = readPushName();
+    if (!original) {
+      throw new Error("could not read push name from AppState.sqlite");
+    }
+
+    const applied = await wa.profile.modify({ name: `${original} [mx]` });
+    if (!applied.nameUpdated) {
+      throw new Error("modify did not report nameUpdated");
+    }
+
+    const restored = await wa.profile.modify({ name: original });
+    if (!restored.nameUpdated) {
+      throw new Error("restore did not report nameUpdated");
+    }
+
+    return { detail: `name="${original}" changed+restored` };
+  });
+}
+
+function readPushName(): string | null {
+  const root = `${process.env.HOME}/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/AppState`;
+  for (const entry of readdirSync(root)) {
+    try {
+      const store = new Database(`file:${root}/${entry}/AppState.sqlite?mode=ro`, {
+        readonly: true,
+      });
+      const row = store
+        .query<{ ZVALUE: Uint8Array }, []>(
+          "SELECT ZVALUE FROM ZAPPSTATEKEYVALUEENTITY WHERE ZKEY = 'MT_push_name'"
+        )
+        .get();
+      store.close();
+      if (row?.ZVALUE) {
+        return new TextDecoder().decode(row.ZVALUE);
+      }
+    } catch {
+      // skip non-AppState entries
+    }
+  }
+  return null;
+}
+
 async function queryMatrix(target: string): Promise<void> {
   await run("query.listRecent", target, async () => {
     const page = await wa.messages.listRecent({ pageSize: 10 });
@@ -289,8 +462,11 @@ async function main(): Promise<void> {
   // Full matrix against self (delivers reliably; no spam to others).
   await textMatrix(SELF, true);
   await mediaMatrix(SELF);
+  await attachmentMatrix(SELF);
+  await lifecycleMatrix(SELF);
   await queryMatrix(SELF);
   await pollMatrix(SELF);
+  await profileMatrix();
 
   // Representative subset against Ling (may stay pending if offline).
   await textMatrix(PEER, false);

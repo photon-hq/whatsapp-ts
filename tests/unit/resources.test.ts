@@ -4,6 +4,7 @@ import { MediaKind } from "../../src/generated/whatsapp_message_service.ts";
 import { EventsResource } from "../../src/resources/events.ts";
 import { MessagesResource } from "../../src/resources/messages.ts";
 import { PollsResource } from "../../src/resources/polls.ts";
+import { ProfileResource } from "../../src/resources/profile.ts";
 import type { LiveEvent } from "../../src/types/events.ts";
 
 describe("resources", () => {
@@ -239,6 +240,195 @@ describe("resources", () => {
         accessibilityText: "   ",
       })
     ).rejects.toThrow("accessibilityText must not be empty");
+  });
+
+  test("new send methods map requests and validate inputs", async () => {
+    const calls: Record<string, unknown> = {};
+    const snapshot = {
+      message: {
+        messageId: "m9",
+        recipient: "15551234567",
+        chatJid: "15551234567@s.whatsapp.net",
+        stanzaId: "stanza-9",
+        text: "",
+        isFromMe: true,
+        messageType: 1,
+        messageDate: null,
+        sentDate: null,
+      },
+    };
+    const resource = new MessagesResource({
+      async sendDocument(request: unknown) {
+        calls.document = request;
+        return snapshot;
+      },
+      async sendAudio(request: unknown) {
+        calls.audio = request;
+        return snapshot;
+      },
+      async sendSticker(request: unknown) {
+        calls.sticker = request;
+        return snapshot;
+      },
+      async sendContact(request: unknown) {
+        calls.contact = request;
+        return snapshot;
+      },
+      async sendAlbum(request: unknown) {
+        calls.album = request;
+        return { messages: [snapshot.message, snapshot.message] };
+      },
+    } as never);
+
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    await resource.sendDocument("15551234567", bytes, {
+      fileName: "report.pdf",
+      mimeType: "application/pdf",
+      caption: "q3",
+    });
+    expect(calls.document).toMatchObject({
+      recipient: "15551234567",
+      fileName: "report.pdf",
+      mimeType: "application/pdf",
+      caption: "q3",
+    });
+
+    await resource.sendAudio("15551234567", bytes, { mimeType: "audio/mp4" });
+    expect(calls.audio).toMatchObject({ mimeType: "audio/mp4" });
+
+    await resource.sendSticker("15551234567", bytes, { emojis: ["😀"] });
+    expect(calls.sticker).toMatchObject({ emojis: ["😀"] });
+
+    await resource.sendContact("15551234567", {
+      name: "Alice",
+      phones: ["+15550001111"],
+    });
+    expect(calls.contact).toMatchObject({
+      contacts: [{ name: "Alice", phones: ["+15550001111"] }],
+    });
+
+    const album = await resource.sendAlbum("15551234567", [
+      { kind: "image", data: bytes },
+      { kind: "image", data: bytes },
+    ]);
+    expect(album).toHaveLength(2);
+    expect(calls.album).toMatchObject({
+      items: [
+        { kind: MediaKind.MEDIA_KIND_IMAGE },
+        { kind: MediaKind.MEDIA_KIND_IMAGE },
+      ],
+    });
+
+    await expect(
+      resource.sendAlbum("15551234567", [{ kind: "image", data: bytes }])
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      resource.sendAlbum("15551234567", [
+        { kind: "image", data: bytes },
+        { kind: "video", data: bytes },
+      ])
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      resource.sendDocument("15551234567", new Uint8Array())
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      resource.sendContact("15551234567", [])
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("lifecycle methods map requests and results", async () => {
+    const calls: Record<string, unknown> = {};
+    const resource = new MessagesResource({
+      async editMessage(request: unknown) {
+        calls.edit = request;
+        return {
+          message: {
+            messageId: "m1",
+            recipient: "15551234567",
+            chatJid: "15551234567@s.whatsapp.net",
+            stanzaId: "stanza-1",
+            text: "edited",
+            isFromMe: true,
+            messageType: 0,
+            messageDate: null,
+            sentDate: null,
+          },
+        };
+      },
+      async revokeMessage(request: unknown) {
+        calls.revoke = request;
+        return { messageId: "m1", removed: true };
+      },
+      async deleteMessage(request: unknown) {
+        calls.delete = request;
+        return { messageId: "m1", removed: true };
+      },
+      async getMessageStatus(request: unknown) {
+        calls.status = request;
+        return {
+          messageId: "m1",
+          status: 3,
+          statusCode: 5,
+          isFromMe: true,
+          isSent: true,
+          isError: false,
+          isPlayed: false,
+          text: "hello",
+        };
+      },
+    } as never);
+
+    const edited = await resource.edit("m1", "edited");
+    expect(edited.text).toBe("edited");
+    expect(calls.edit).toMatchObject({ messageId: "m1", text: "edited" });
+
+    const revoked = await resource.revoke("m1");
+    expect(revoked).toEqual({ messageId: "m1", removed: true });
+
+    const deleted = await resource.delete("m1");
+    expect(deleted).toEqual({ messageId: "m1", removed: true });
+
+    const status = await resource.getStatus("m1");
+    expect(status.messageId).toBe("m1");
+    expect(status.status).toBe("delivered");
+
+    await expect(resource.edit("", "x")).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    await expect(resource.edit("m1", "")).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    await expect(resource.revoke(" ")).rejects.toBeInstanceOf(ValidationError);
+    await expect(resource.getStatus("")).rejects.toBeInstanceOf(
+      ValidationError
+    );
+  });
+
+  test("profile modify maps request and validates inputs", async () => {
+    const calls: unknown[] = [];
+    const resource = new ProfileResource({
+      async modifyProfile(request: unknown) {
+        calls.push(request);
+        return { nameUpdated: true, aboutUpdated: true, avatarUpdated: false };
+      },
+    } as never);
+
+    const result = await resource.modify({ name: " Alice ", about: "hi" });
+    expect(result).toEqual({
+      nameUpdated: true,
+      aboutUpdated: true,
+      avatarUpdated: false,
+    });
+    expect(calls[0]).toMatchObject({ name: "Alice", about: "hi" });
+
+    await expect(resource.modify({})).rejects.toBeInstanceOf(ValidationError);
+    await expect(resource.modify({ name: "  " })).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    await expect(
+      resource.modify({ avatar: new Uint8Array() })
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   test("react returns reacted message snapshot", async () => {

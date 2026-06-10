@@ -10,6 +10,8 @@ import type { MessageServiceClient } from "../generated/whatsapp_message_service
 import { MessageServiceDefinition } from "../generated/whatsapp_message_service.ts";
 import type { PollServiceClient } from "../generated/whatsapp_poll_service.ts";
 import { PollServiceDefinition } from "../generated/whatsapp_poll_service.ts";
+import type { ProfileServiceClient } from "../generated/whatsapp_profile_service.ts";
+import { ProfileServiceDefinition } from "../generated/whatsapp_profile_service.ts";
 import type { RetryOptions } from "../types/common.ts";
 import {
   authMiddleware,
@@ -21,12 +23,14 @@ import {
 export type { EventServiceClient } from "../generated/whatsapp_event_service.ts";
 export type { MessageServiceClient } from "../generated/whatsapp_message_service.ts";
 export type { PollServiceClient } from "../generated/whatsapp_poll_service.ts";
+export type { ProfileServiceClient } from "../generated/whatsapp_profile_service.ts";
 
 export interface GrpcClients {
   readonly channel: Channel;
   readonly events: EventServiceClient;
   readonly messages: MessageServiceClient;
   readonly polls: PollServiceClient;
+  readonly profile: ProfileServiceClient;
 }
 
 export interface GrpcClientOptions {
@@ -65,6 +69,7 @@ export function createGrpcClients(options: GrpcClientOptions): GrpcClients {
   return {
     messages: factory.create(MessageServiceDefinition, channel),
     polls: factory.create(PollServiceDefinition, channel),
+    profile: factory.create(ProfileServiceDefinition, channel),
     events: factory.create(EventServiceDefinition, channel),
     channel,
   };

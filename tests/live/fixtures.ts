@@ -81,6 +81,102 @@ export function makePng(
   return png;
 }
 
+/** Generate a tiny self-contained MP4 (1s 128x128 test pattern) via ffmpeg. */
+export function makeMp4(): Uint8Array {
+  return ffmpegOutput([
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=128x128:rate=15:duration=1",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+  ]);
+}
+
+/** Generate a tiny self-contained M4A/AAC clip (1s sine tone) via ffmpeg. */
+export function makeM4a(): Uint8Array {
+  return ffmpegOutput([
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:duration=1",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "64k",
+    "-movflags",
+    "+faststart",
+    "-f",
+    "mp4",
+  ]);
+}
+
+function ffmpegOutput(args: readonly string[]): Uint8Array {
+  const out = `${process.env.TMPDIR ?? "/tmp"}/wa-fixture-${crypto.randomUUID()}`;
+  const proc = Bun.spawnSync([
+    "ffmpeg",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    ...args,
+    out,
+  ]);
+  if (proc.exitCode !== 0) {
+    throw new Error(
+      `ffmpeg failed (${proc.exitCode}): ${new TextDecoder().decode(proc.stderr)}`
+    );
+  }
+  const bytes = new Uint8Array(require("node:fs").readFileSync(out));
+  require("node:fs").rmSync(out, { force: true });
+  return bytes;
+}
+
+/** Minimal single-page PDF document (valid, openable). */
+export function makePdf(text = "whatsapp-ts test document"): Uint8Array {
+  const body = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 120]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj
+4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+5 0 obj<</Length 60>>stream
+BT /F1 14 Tf 20 60 Td (${text}) Tj ET
+endstream endobj
+trailer<</Root 1 0 R>>
+%%EOF`;
+  return new TextEncoder().encode(body);
+}
+
+/** Synthesize a valid vCard 3.0 string. */
+export function makeVcard(opts: {
+  name: string;
+  phone?: string;
+  email?: string;
+  org?: string;
+}): string {
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `FN:${opts.name}`,
+    `N:${opts.name};;;;`,
+  ];
+  if (opts.org) {
+    lines.push(`ORG:${opts.org}`);
+  }
+  if (opts.phone) {
+    lines.push(`TEL;type=CELL:${opts.phone}`);
+  }
+  if (opts.email) {
+    lines.push(`EMAIL:${opts.email}`);
+  }
+  lines.push("END:VCARD");
+  return lines.join("\n");
+}
+
 const CHAT_STORAGE_PATH = `${process.env.HOME}/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite`;
 
 export interface DbRow {

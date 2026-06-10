@@ -7,16 +7,25 @@ import {
   mapMessage,
   mapMessageEvent,
   mapMessagePage,
+  mapMessageStatus,
   mapTextBlock,
 } from "../transport/mapper.ts";
 import type { WriteOptions } from "../types/common.ts";
 import type { MessageEvent } from "../types/events.ts";
 import type {
+  AlbumItem,
+  ContactCard,
   Message,
   MessageListOptions,
   MessagePage,
+  MessageStatusInfo,
+  RemoveMessageResult,
+  SendAudioOptions,
+  SendDocumentOptions,
   SendImageOptions,
+  SendStickerOptions,
   SendTextOptions,
+  SendVideoOptions,
   TextContent,
 } from "../types/messages.ts";
 import {
@@ -95,6 +104,183 @@ export class MessagesResource {
     }
   }
 
+  async sendVideo(
+    recipient: string,
+    video: Uint8Array,
+    options?: SendVideoOptions
+  ): Promise<Message> {
+    try {
+      const response = await this._client.sendMediaMessage({
+        recipient: parseRecipient(recipient),
+        media: {
+          kind: MediaKind.MEDIA_KIND_VIDEO,
+          data: parseBytes(video, "video"),
+          caption: parseOptionalString(options?.caption, "caption"),
+          accessibilityText: parseOptionalString(
+            options?.accessibilityText,
+            "accessibilityText"
+          ),
+        },
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async sendAlbum(
+    recipient: string,
+    items: readonly AlbumItem[],
+    options?: WriteOptions
+  ): Promise<Message[]> {
+    try {
+      if (!Array.isArray(items) || items.length < 2 || items.length > 30) {
+        throw validationError("items must contain 2 to 30 media entries", {
+          field: "items",
+        });
+      }
+
+      const kinds = new Set(items.map((item) => item.kind));
+      if (kinds.size !== 1) {
+        throw validationError("all album items must share the same kind", {
+          field: "items",
+        });
+      }
+
+      const response = await this._client.sendAlbum({
+        recipient: parseRecipient(recipient),
+        items: items.map((item, index) => ({
+          kind: toProtoMediaKind(item.kind, index),
+          data: parseBytes(item.data, `items[${index}].data`),
+          caption: parseOptionalString(item.caption, `items[${index}].caption`),
+          accessibilityText: parseOptionalString(
+            item.accessibilityText,
+            `items[${index}].accessibilityText`
+          ),
+        })),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return response.messages.map((message) =>
+        mapMessage(message as Parameters<typeof mapMessage>[0])
+      );
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async sendDocument(
+    recipient: string,
+    document: Uint8Array,
+    options?: SendDocumentOptions
+  ): Promise<Message> {
+    try {
+      const response = await this._client.sendDocument({
+        recipient: parseRecipient(recipient),
+        data: parseBytes(document, "document"),
+        fileName: parseOptionalString(options?.fileName, "fileName"),
+        mimeType: parseOptionalString(options?.mimeType, "mimeType"),
+        caption: parseOptionalString(options?.caption, "caption"),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async sendAudio(
+    recipient: string,
+    audio: Uint8Array,
+    options?: SendAudioOptions
+  ): Promise<Message> {
+    try {
+      const response = await this._client.sendAudio({
+        recipient: parseRecipient(recipient),
+        data: parseBytes(audio, "audio"),
+        mimeType: parseOptionalString(options?.mimeType, "mimeType"),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async sendSticker(
+    recipient: string,
+    sticker: Uint8Array,
+    options?: SendStickerOptions
+  ): Promise<Message> {
+    try {
+      const response = await this._client.sendSticker({
+        recipient: parseRecipient(recipient),
+        data: parseBytes(sticker, "sticker"),
+        emojis: (options?.emojis ?? []).map((emoji) => parseReactionEmoji(emoji)),
+        accessibilityText: parseOptionalString(
+          options?.accessibilityText,
+          "accessibilityText"
+        ),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async sendContact(
+    recipient: string,
+    contacts: ContactCard | readonly ContactCard[],
+    options?: WriteOptions
+  ): Promise<Message> {
+    try {
+      const normalized = Array.isArray(contacts)
+        ? (contacts as readonly ContactCard[])
+        : [contacts as ContactCard];
+      if (normalized.length === 0) {
+        throw validationError("contacts must not be empty", {
+          field: "contacts",
+        });
+      }
+
+      const response = await this._client.sendContact({
+        recipient: parseRecipient(recipient),
+        contacts: normalized.map((contact, index) =>
+          parseContactCard(contact, index)
+        ),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
   async react(
     messageId: string,
     emoji: string,
@@ -111,6 +297,77 @@ export class MessagesResource {
       });
 
       return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async edit(
+    messageId: string,
+    text: string,
+    options?: WriteOptions
+  ): Promise<Message> {
+    try {
+      const response = await this._client.editMessage({
+        messageId: parseRequiredString(messageId, "messageId"),
+        text: parseRequiredString(text, "text"),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return mapMessageResponse(response);
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async revoke(
+    messageId: string,
+    options?: WriteOptions
+  ): Promise<RemoveMessageResult> {
+    try {
+      const response = await this._client.revokeMessage({
+        messageId: parseRequiredString(messageId, "messageId"),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return { messageId: response.messageId, removed: response.removed };
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async delete(
+    messageId: string,
+    options?: WriteOptions
+  ): Promise<RemoveMessageResult> {
+    try {
+      const response = await this._client.deleteMessage({
+        messageId: parseRequiredString(messageId, "messageId"),
+        clientMessageId: parseOptionalString(
+          options?.clientMessageId,
+          "clientMessageId"
+        ),
+      });
+
+      return { messageId: response.messageId, removed: response.removed };
+    } catch (err) {
+      throw toWhatsAppError(err);
+    }
+  }
+
+  async getStatus(messageId: string): Promise<MessageStatusInfo> {
+    try {
+      const response = await this._client.getMessageStatus({
+        messageId: parseRequiredString(messageId, "messageId"),
+      });
+
+      return mapMessageStatus(response);
     } catch (err) {
       throw toWhatsAppError(err);
     }
@@ -194,6 +451,44 @@ function mapMessageResponse(response: { readonly message?: unknown }): Message {
   }
 
   return mapMessage(response.message as Parameters<typeof mapMessage>[0]);
+}
+
+function toProtoMediaKind(kind: "image" | "video", index: number): MediaKind {
+  switch (kind) {
+    case "image":
+      return MediaKind.MEDIA_KIND_IMAGE;
+    case "video":
+      return MediaKind.MEDIA_KIND_VIDEO;
+    default:
+      throw validationError("kind must be image or video", {
+        field: `items[${index}].kind`,
+      });
+  }
+}
+
+function parseContactCard(contact: ContactCard, index: number) {
+  const field = `contacts[${index}]`;
+  const name = parseOptionalString(contact.name, `${field}.name`);
+  const vcard = parseOptionalString(contact.vcard, `${field}.vcard`);
+  const phones = [...(contact.phones ?? [])];
+  const emails = [...(contact.emails ?? [])];
+  const organization = parseOptionalString(
+    contact.organization,
+    `${field}.organization`
+  );
+
+  if (!(name || vcard)) {
+    throw validationError("contact requires a name or a vcard", { field });
+  }
+
+  if (!vcard && phones.length === 0 && emails.length === 0 && !organization) {
+    throw validationError(
+      "contact requires a vcard or at least one phone/email/organization field",
+      { field }
+    );
+  }
+
+  return { name: name ?? "", vcard, phones, emails, organization };
 }
 
 function parseBytes(value: Uint8Array, field: string): Uint8Array {

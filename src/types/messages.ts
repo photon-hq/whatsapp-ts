@@ -49,6 +49,60 @@ export interface SendImageOptions extends WriteOptions {
   readonly caption?: string;
 }
 
+export interface SendDocumentOptions extends WriteOptions {
+  /** Optional document caption. */
+  readonly caption?: string;
+  /** File name shown in the chat bubble, for example `"report.pdf"`. */
+  readonly fileName?: string;
+  /** MIME type used when the file name lacks a usable extension. */
+  readonly mimeType?: string;
+}
+
+/** One album entry for `messages.sendAlbum`. */
+export interface AlbumItem {
+  /** Accessibility description forwarded to WhatsApp when supported. */
+  readonly accessibilityText?: string;
+  /** Optional per-item caption. */
+  readonly caption?: string;
+  /** Media file bytes. */
+  readonly data: Uint8Array;
+  /** Media kind. All items in one album must share the same kind. */
+  readonly kind: "image" | "video";
+}
+
+export interface SendAudioOptions extends WriteOptions {
+  /** Audio MIME type, for example `"audio/mp4"`. Must be an `audio/*` type. */
+  readonly mimeType?: string;
+}
+
+export interface SendStickerOptions extends WriteOptions {
+  /** Accessibility description forwarded to WhatsApp when supported. */
+  readonly accessibilityText?: string;
+  /** Emojis associated with the sticker for search and suggestions. */
+  readonly emojis?: readonly string[];
+}
+
+/**
+ * One contact card for `messages.sendContact`.
+ *
+ * Provide a full `vcard`, or a `name` plus at least one of
+ * `phones`/`emails`/`organization` to synthesize one.
+ */
+export interface ContactCard {
+  readonly emails?: readonly string[];
+  readonly name?: string;
+  readonly organization?: string;
+  readonly phones?: readonly string[];
+  readonly vcard?: string;
+}
+
+export interface SendVideoOptions extends WriteOptions {
+  /** Accessibility description forwarded to WhatsApp when supported. */
+  readonly accessibilityText?: string;
+  /** Optional video caption. */
+  readonly caption?: string;
+}
+
 export interface MessageListOptions {
   /** Return messages after this message date. */
   readonly after?: Date;
@@ -138,6 +192,35 @@ export interface MessageAttachment {
   readonly messageId: string;
   readonly replyToMessageId?: string;
   readonly title?: string;
+}
+
+/** High-level delivery status, mirroring WhatsApp's own checkmark buckets. */
+export type MessageDeliveryStatus =
+  | "pending"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "played"
+  | "error"
+  | "unknown";
+
+export interface MessageStatusInfo {
+  readonly isError: boolean;
+  readonly isFromMe: boolean;
+  readonly isPlayed: boolean;
+  readonly isSent: boolean;
+  readonly messageId: string;
+  readonly status: MessageDeliveryStatus;
+  /** Raw WhatsApp computed status value for callers that need the exact state. */
+  readonly statusCode: number;
+  /** Best-effort message text snippet, when available. */
+  readonly text: string;
+}
+
+export interface RemoveMessageResult {
+  readonly messageId: string;
+  /** True once the local ChatStorage row is gone (or replaced by a revoke placeholder). */
+  readonly removed: boolean;
 }
 
 export interface MessageReaction {
