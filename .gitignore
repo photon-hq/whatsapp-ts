@@ -29,3 +29,6 @@ coverage/
 .vscode/
 .zed/
 .DS_Store
+
+# live test run artifacts
+tests/live/last-run.json
